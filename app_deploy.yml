@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: DeploymentConfig
+metadata:
+  name: drupal-8
+  labels:
+    app: drupal-8
+spec:
+  replicas: 1
+  selector:
+    app: drupal-8
+  template:
+    metadata:
+      labels:
+        app: drupal-8
+    spec:
+      volumes:
+        # Create the shared files volume to be used in both pods
+        - name: app
+          emptyDir: {}
+        - name: drupal-8-files
+          persistentVolumeClaim:
+            claimName: drupal-8-files
+      containers:
+      - name: php-fpm
+        image: 'mopga/openshift-drupal:1.0'
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: database-user
+              name: drupal-8
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: database-password
+              name: drupal-8
+        - name: PG_HOST
+          value: drupal-8-db
+        - name: PG_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: drupal8
+        - name: OPENSHIFT_BUILD_NAME
+          value: "1"
+        volumeMounts:
+          - name: app
+            mountPath: /app
+          - name: drupal-8-files
+            mountPath: /shared
+        lifecycle:
+          postStart:
+            exec:
+              command:
+                - "/bin/sh"
+                - "-c"
+                - > 
+                  cp -fr /code/. /app;
+                  rm -rf /app/web/sites/default/files;
+                  ln -s /shared /app/web/sites/default/files;
+      - name: nginx
+        image: 'mopga/openshift-nginx:1.0'
+        ports:
+          - name: http
+            containerPort: 8080
+        volumeMounts:
+          - name: app
+            mountPath: /app
+          - name: drupal-8-files
+            mountPath: /shared
+  triggers:
+    - type: ConfigChange
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+          - php-fpm
+        from:
+          kind: "ImageStreamTag"
+          name: "openshift-drupal:latest"
+          namespace: drupal-8
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+          - nginx
+        from:
+          kind: "ImageStreamTag"
+          name: "openshift-nginx:latest"
+          namespace: drupal-8
